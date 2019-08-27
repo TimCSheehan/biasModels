@@ -1,2 +1,7 @@
 .*
 _*
+__pycache__/
+_figs/
+.DS_Store
+.ipynb_checkpoints
+

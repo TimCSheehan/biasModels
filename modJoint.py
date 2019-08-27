@@ -5,14 +5,14 @@ pi = np.pi
 
 class modJoint:
     
-    def __init__(self, M=20,gamma=0.4,kappaCB= 2.5,noiseFR=0.0,kappaSB=5,gammaSB=2,sensoryNoise=10,lambdaSB=10,p_same=0.9):
+    def __init__(self, M=20,gammaCB=0.4,kappaCB= 2.5,noiseCB=0.0,gammaSB=2,lambdaSB=10,p_same=0.9):
         
         # generative model (CB)
         self.M = M
         self.psi = np.linspace(-pi,pi,self.M) # neuron selectivity
-        self.gamma = gamma 
+        self.gammaCB = gammaCB 
         self.kappaCB = kappaCB
-        self.noiseFR = noiseFR
+        self.noiseCB = noiseCB
         
         # prior distribution
         self.n_view = 180
@@ -29,11 +29,16 @@ class modJoint:
         # SD
         self.n_step = self.n_view
         self.s_0 = np.linspace(0,180,self.n_step)
-        self.kappaSB = kappaSB # concentration of sensory error
+#         self.kappaSB = kappaSB # concentration of sensory error
         self.gammaSB = gammaSB
         self.lambdaSB = lambdaSB
-        self.sensoryNoise=sensoryNoise
+        self.sensoryNoise=None
         self.p_same = p_same
+        
+        # init
+        self.stim = None
+        self.inferred_ori = None
+        self.E = None
         
     def gauss(self,x,mu=0,sig=1): return 1/(np.sqrt(2*pi*sig**2))*np.exp(-(x-mu)**2/(2*sig**2))
     def angle(self,s_0,s_1):
@@ -46,7 +51,7 @@ class modJoint:
         out = np.ones((len(stim),self.M))
         for i in range(len(stim)):
             out[i,:]=  np.exp(self.kappaCB*np.cos(Du[i]-self.psi)-1)
-        out*=self.gamma/self.M
+        out*=self.gammaCB/self.M
         return out
 
     def pos_exp(self): # poisson expected n spikes given rate
@@ -69,7 +74,7 @@ class modJoint:
     def run_model(self,N=5000):
 
         stim = np.random.randint(0,180,N)
-        spks=np.random.poisson(self.fs(stim)) + np.random.poisson(self.noiseFR,(len(stim),self.M))# generated spikes
+        spks=np.random.poisson(self.fs(stim)) + np.random.poisson(self.noiseCB,(len(stim),self.M))# generated spikes
         n_spks = np.sum(spks,1)
         spks[n_spks==0]=np.random.poisson(self.fs(stim[n_spks==0])) # generated spikes
         n_spks = np.sum(spks,1)
@@ -111,21 +116,24 @@ class modJoint:
             inferred_ori[i] = self.s_0[decoded_ori]
 
         E = self.angle(inferred_ori,stim)
-        return stim, inferred_ori,E
+        self.stim = stim
+        self.inferred_ori = inferred_ori
+        self.E = E
+        return self.stim, self.inferred_ori,self.E
 
 
     # visualize results
-    def quick_view_sb(self,seq,inferred_ori,l_conv=100,vis=0):
-        E = self.angle(inferred_ori,seq)
-        d = self.angle(seq[1:],seq[:-1])
-        Eu = E[1:]
-        
+    def quick_view_sb(self,l_conv=100,vis=0): # seq,inferred_ori,
+        E = self.angle(self.inferred_ori,self.stim)
+        d = self.angle(self.stim[1:],self.stim[:-1])
+        Eu = self.E[1:]
+
         order = np.argsort(d)
         conv_win = self.gauss(np.linspace(-2,2,l_conv))
         conv_win/=np.sum(conv_win)
-        E_out = np.convolve(Eu[order],conv_win,mode='valid')
-        aE_out = np.convolve(np.abs(Eu[order]),conv_win,mode='valid')
-        d_out = np.convolve(d[order],conv_win,mode='valid')
+        SBc_E = np.convolve(Eu[order],conv_win,mode='valid')
+        SBc_aE = np.convolve(np.abs(Eu[order]),conv_win,mode='valid')
+        SBc_d = np.convolve(d[order],conv_win,mode='valid')
 
         if vis:       
             plt.subplot(121)
@@ -139,47 +147,61 @@ class modJoint:
             plt.xlabel('$Correct_0 - Correct_{-1}$')
             plt.tight_layout()
             plt.show()
-        else:
-            
             return d_out,E_out,aE_out
+        else:
+            self.SBc_d,self.SBc_E,self.SBc_aE = SBc_d,SBc_E,SBc_aE
+            
 
-    def quick_view_cb(self,stim,dec_stim=None,E=None,l_conv=100,vis=0):
-        if type(stim) is tuple:
-            stim,dec_stim,E = stim
-        E = self.angle(dec_stim,stim)
-        
+    def quick_view_cb(self,l_conv=100,vis=0): # ,stim,dec_stim=None
         conv_win = self.gauss(np.linspace(-2,2,l_conv))
         conv_win/=np.sum(conv_win)
-        order = np.argsort(stim)
-        c_absE = np.convolve(np.abs(E[order]),conv_win,mode='valid')
-        c_E = np.convolve(E[order],conv_win,mode='valid')
+        order = np.argsort(self.stim)
+        CBc_aE = np.convolve(np.abs(self.E[order]),conv_win,mode='valid')
+        CBc_E = np.convolve(self.E[order],conv_win,mode='valid')
+        CBc_stim = np.convolve(self.stim[order],conv_win,mode='valid')
+        
+        if vis:
+            plt.subplot(121)
+            plt.plot(vis_s,vis_E)
+            plt.title('Cardinal Bias')
+            plt.ylabel('Bias (deg)')
+            plt.xlabel('Orientation Stim (deg)')
+            plt.subplot(122)
+            plt.plot(vis_s,vis_aE)
+            plt.ylabel('|Error| (deg)')
+            plt.xlabel('Orientation Stim (deg)')
+            plt.tight_layout()
+            plt.show()
+            return pos_stim,c_E,c_absE
+        else:
+            self.CBc_stim,self.CBc_E,self.CBc_aE = CBc_stim, CBc_E, CBc_aE
 
-        pos_stim = np.convolve(stim[order],conv_win,mode='valid')
-        return pos_stim,c_E,c_absE
-
-    def quick_view_results(self,stim,inferred_ori,lwin=1000,sav_name=0):
-        d_out,E_out,aE_out = self.quick_view_sb(stim,inferred_ori,l_conv=lwin)
+    def quick_view_results(self,lwin=1000,sav_root=0): # ,stim,inferred_ori
+        self.quick_view_sb(l_conv=lwin,vis=0)
         plt.subplot(221)
-        plt.plot(d_out,E_out)
+        plt.plot(self.SBc_d,self.SBc_E)
         plt.title('Serial Bias')
         plt.ylabel('Bias (deg)')
         plt.xlabel('$Correct_0 - Correct_{-1}$')
         plt.subplot(222)
-        plt.plot(d_out,aE_out)
+        plt.plot(self.SBc_d,self.SBc_aE)
+        plt.title('$\gamma:%.1f$ $\lambda:%.1f$' %(self.gammaSB,self.lambdaSB))
         plt.ylabel('|Error| (deg)')
         plt.xlabel('$Correct_0 - Correct_{-1}$')
 
-        vis_s,vis_E,vis_aE = self.quick_view_cb(stim,inferred_ori,l_conv=lwin)
+        self.quick_view_cb(l_conv=lwin,vis=0)
         plt.subplot(223)
-        plt.plot(vis_s,vis_E)
+        plt.plot(self.CBc_stim,self.CBc_E)
         plt.title('Cardinal Bias')
         plt.ylabel('Bias (deg)')
         plt.xlabel('Orientation Stim (deg)')
         plt.subplot(224)
-        plt.plot(vis_s,vis_aE)
+        plt.plot(self.CBc_stim,self.CBc_aE)
         plt.ylabel('|Error| (deg)')
         plt.xlabel('Orientation Stim (deg)')
+        plt.title('$\gamma:%.1f$ $\kappa:%.1f$ noise:%d' %(self.gammaCB,self.kappaCB,self.noiseCB))
         plt.tight_layout()
-        if sav_name:
-            plt.savefig(sav_name)
+        if sav_root:
+            sav_str = sav_root + 'modelJoint_CB_g%d_k%d_n%d_SB_g%d_l%d.png' %(self.gammaCB*10,self.kappaCB*10,self.noiseCB,self.gammaSB,self.lambdaSB)
+            plt.savefig(sav_str)
         plt.show()
