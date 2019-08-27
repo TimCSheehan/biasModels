@@ -199,9 +199,9 @@ class modJoint:
         plt.plot(self.CBc_stim,self.CBc_aE)
         plt.ylabel('|Error| (deg)')
         plt.xlabel('Orientation Stim (deg)')
-        plt.title('$\gamma:%.1f$ $\kappa:%.1f$ noise:%d' %(self.gammaCB,self.kappaCB,self.noiseCB))
+        plt.title('$\gamma:%.1f$ $\kappa:%.1f$ noise:%d' %(self.gammaCB,self.kappaCB,self.noiseCB*100))
         plt.tight_layout()
         if sav_root:
-            sav_str = sav_root + 'modelJoint_CB_g%d_k%d_n%d_SB_g%d_l%d.png' %(self.gammaCB*10,self.kappaCB*10,self.noiseCB,self.gammaSB,self.lambdaSB)
+            sav_str = sav_root + 'modelJoint_CB_g%d_k%d_n%d_SB_g%d_l%d.png' %(self.gammaCB*10,self.kappaCB*10,self.noiseCB*100,self.gammaSB,self.lambdaSB)
             plt.savefig(sav_str)
         plt.show()
