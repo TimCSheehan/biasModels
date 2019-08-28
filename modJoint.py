@@ -47,6 +47,7 @@ class modJoint:
         
         self.PAPERS =['https://www.jneurosci.org/content/jneuro/38/32/7132.full.pdf',
                           'https://www.biorxiv.org/content/10.1101/671958v1']
+        self.N = 50000 # default for stim generation
         
     def gauss(self,x,mu=0,sig=1): return 1/(np.sqrt(2*pi*sig**2))*np.exp(-(x-mu)**2/(2*sig**2))
     def inv_cdf(self,cdf,probe): return np.argmin(np.abs(np.expand_dims(cdf,1) - probe),0) # draws from 'y'-axis
@@ -158,11 +159,10 @@ class modJoint:
             self.stimHat[i] = self.s_0[decoded_ori]
 
         self.E = self.angle(self.stimHat,self.stim)
-
+        self.d = self.angle(self.stim[1:],self.stim[:-1])
     # visualize results
     def quick_view_sb(self,lwin=100,vis=0):
         E = self.angle(self.stimHat,self.stim)
-        self.d = self.angle(self.stim[1:],self.stim[:-1])
         Eu = self.E[1:]
 
         order = np.argsort(self.d)
