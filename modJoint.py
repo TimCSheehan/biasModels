@@ -21,16 +21,13 @@ class modJoint:
         self.ori = np.arange(self.n_view)
         self.p_theta = 2 - np.abs(np.sin(self.theta)) # prior distribution
         self.p_theta/=np.sum(self.p_theta) # PDF
-        D = np.cumsum(self.p_theta) # CDF
-        D = D*2*pi-pi
-        self.D = D
-        self.spks_sim = np.arange(30)
+        self.D = np.cumsum(self.p_theta)*2*pi-pi # CDF
+        self.spks_sim = np.arange(35)
         self.ori = np.arange(self.n_view)
         
         # SD
         self.n_step = self.n_view
-        self.s_0 = np.linspace(0,180,self.n_step)
-#         self.kappaSB = kappaSB # concentration of sensory error, is this in paper?
+        self.s_0 = np.linspace(0,179,self.n_step)# was 0,180
         self.gammaSB = gammaSB
         self.lambdaSB = lambdaSB
         self.sensoryNoise=None
@@ -44,6 +41,7 @@ class modJoint:
         self.uniform_tuning = uniform_tuning  #CB
         self.uniform_trans = uniform_trans    #SB only affects decoder, NOT stim seq. generation
         self.VERBOSE = VERBOSE
+        self.extraAttempts = 3 # to minimize spike-less trials
         
         self.PAPERS =['https://www.jneurosci.org/content/jneuro/38/32/7132.full.pdf',
                           'https://www.biorxiv.org/content/10.1101/671958v1']
@@ -106,40 +104,42 @@ class modJoint:
                 joint_prob = trans_prob*self.p_theta
                 joint_prob/=np.sum(joint_prob) # normalize
                 self.stim[i+1] = self.inv_cdf(np.cumsum(joint_prob),np.random.rand())
+                
+    def gen_spks(self): # generate spikes from poisson process
+        self.spks = np.random.poisson(self.fs(self.stim)) + \
+        np.random.poisson(self.noiseCB,(len(self.stim),self.M))
+        self.n_spks = np.sum(self.spks,1)
+        for i in range(self.extraAttempts):
+            self.spks[self.n_spks==0]=np.random.poisson(self.fs(self.stim[self.n_spks==0])) + \
+            np.random.poisson(self.noiseCB,(np.sum(self.n_spks==0),self.M))
+            self.n_spks = np.sum(self.spks,1)
             
+    def get_stimulus_likelihood(self):
+        exp_out = self.pos_exp() # prior expectation for # of spikes
+        ll = np.zeros((self.N,180))
+        for i in range(self.M):
+            this_ll = exp_out[self.spks[:,i],:,i]
+            ll += np.log(this_ll.astype(float))
+        return np.exp(ll)
+
     def run_model(self,N=5000):
         self.N = N
         self.gen_stim()
-
-        spks=np.random.poisson(self.fs(self.stim)) + np.random.poisson(self.noiseCB,(len(self.stim),self.M))# generated spikes
-        n_spks = np.sum(spks,1)
-        spks[n_spks==0]=np.random.poisson(self.fs(self.stim[n_spks==0])) # generated spikes
-        n_spks = np.sum(spks,1)
-        spks[n_spks==0]=np.random.poisson(self.fs(self.stim[n_spks==0])) # generated spikes
-        n_spks = np.sum(spks,1)
-
-        exp_out = self.pos_exp() # prior expectation for # of spikes
-
-        # get log-likelihood for each stimuli! 
-        ll = np.zeros((self.N,180))
-        for s in range(self.N):
-            for i in range(self.M):
-                this_ll = exp_out[spks[s][i],:,i]
-                ll[s,:] += np.log(this_ll.astype(float))
-        ll = np.exp(ll)
+        self.gen_spks()
+        
+        ll = self.get_stimulus_likelihood()
         dec_stim = np.argmax(ll,1)
         E_naive = self.angle(dec_stim,self.stim)
         self.sensoryNoise = np.std(E_naive)
         if self.VERBOSE: print(self.sensoryNoise)
 
         # remove trials with no spikes
-        self.stim = self.stim[n_spks>0]
-        dec_stim = dec_stim[n_spks>0]
+        self.stim,dec_stim,sensory = self.stim[self.n_spks>0],dec_stim[self.n_spks>0],ll[self.n_spks>0,:]
+        self.spks = self.spks[self.n_spks>0,:]
         if self.VERBOSE:
-            print('Throwing away %d trials with zero [0] spikes' %sum(n_spks==0))
-            print('Med of %d Spikes' %(np.median(n_spks)))
-        sensory = ll[n_spks>0,:]
-
+            print('Throwing away %d trials with zero [0] spikes' %sum(self.n_spks==0))
+            print('Med of %d Spikes' %(np.median(self.n_spks)))
+        
         self.N = np.shape(sensory)[0]
         self.stimHat = np.zeros(self.N)
         for i in range(self.N):
@@ -152,14 +152,14 @@ class modJoint:
                 else:
                     prior = self.cf(self.stimHat[i-1])
 
-            sensory_estimate = sensory[i,:]
-            ps_m = prior * sensory_estimate
+            ps_m = prior * sensory[i,:]
             ps_m /= np.sum(ps_m)
             decoded_ori = np.argmax(ps_m) # could use circ_mean
-            self.stimHat[i] = self.s_0[decoded_ori]
+            self.stimHat[i] = self.s_0[decoded_ori] # unity, would change if s_0 resolution was increased 
 
         self.E = self.angle(self.stimHat,self.stim)
-        self.d = self.angle(self.stim[1:],self.stim[:-1])
+        self.d = self.angle(self.stim[:-1],self.stim[1:])
+        
     # visualize results
     def quick_view_sb(self,lwin=100,vis=0):
         E = self.angle(self.stimHat,self.stim)
@@ -177,17 +177,17 @@ class modJoint:
             plt.plot(SBc_d,SBc_E)
             plt.title('Serial Bias')
             plt.ylabel('Bias (deg)')
-            plt.xlabel('$Correct_0 - Correct_{-1}$')
+            plt.xlabel('$Correct_{-1} - Correct_0$')
             plt.subplot(122)
             plt.plot(SBc_d,SBc_aE)
             plt.ylabel('|Error| (deg)')
-            plt.xlabel('$Correct_0 - Correct_{-1}$')
+            plt.xlabel('$Correct_{-1} - Correct_0$')
             plt.tight_layout()
             plt.show()
         else:
             self.SBc_d,self.SBc_E,self.SBc_aE = SBc_d,SBc_E,SBc_aE
             
-    def quick_view_cb(self,lwin=100,vis=0): # ,stim,dec_stim=None
+    def quick_view_cb(self,lwin=100,vis=0):
         conv_win = self.gauss(np.linspace(-2,2,lwin))
         conv_win/=np.sum(conv_win)
         order = np.argsort(self.stim)
@@ -216,12 +216,12 @@ class modJoint:
         plt.plot(self.SBc_d,self.SBc_E)
         plt.title('Serial Bias (%d)' %(self.stim_transition*1))
         plt.ylabel('Bias (deg)')
-        plt.xlabel('$Correct_0 - Correct_{-1}$')
+        plt.xlabel('$Correct_{-1} - Correct_0$')
         plt.subplot(222)
         plt.plot(self.SBc_d,self.SBc_aE)
         plt.title('$\gamma:%.1f$ $\lambda:%.1f$' %(self.gammaSB,self.lambdaSB))
         plt.ylabel('|Error| (deg)')
-        plt.xlabel('$Correct_0 - Correct_{-1}$')
+        plt.xlabel('$Correct_{-1} - Correct_0$')
 
         self.quick_view_cb(lwin,vis=0)
         plt.subplot(223)
