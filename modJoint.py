@@ -121,7 +121,6 @@ class modJoint:
         self.E = E
         return self.stim, self.inferred_ori,self.E
 
-
     # visualize results
     def quick_view_sb(self,l_conv=100,vis=0): # seq,inferred_ori,
         E = self.angle(self.inferred_ori,self.stim)
